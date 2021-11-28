@@ -1,0 +1,127 @@
+FROM debian:buster
+ENV S6_OVERLAY_VERSION=v1.22.1.0
+
+RUN DEBIAN_FRONTEND='noninteractive' \
+    apt-get update \
+    && apt-get install -y \
+       apt-transport-https \
+       apt-utils \
+       gnupg \
+       ca-certificates \
+       net-tools \
+       bash \
+       curl \
+       wget \
+       unzip \
+       patch \
+       nano \
+       procps \
+       lsof \
+       dos2unix \
+       tree \
+       fontconfig \
+       libfreetype6 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN wget https://keybase.io/justcontainers/key.asc --no-check-certificate -O /tmp/s6-overlay-key.asc \
+    && wget https://github.com/just-containers/s6-overlay/releases/download/${S6_OVERLAY_VERSION}/s6-overlay-amd64.tar.gz --no-check-certificate -O /tmp/s6-overlay-amd64.tar.gz \
+    && wget https://github.com/just-containers/s6-overlay/releases/download/${S6_OVERLAY_VERSION}/s6-overlay-amd64.tar.gz.sig --no-check-certificate -O /tmp/s6-overlay-amd64.tar.gz.sig \
+    && gpg --import /tmp/s6-overlay-key.asc \
+    && gpg --verify /tmp/s6-overlay-amd64.tar.gz.sig /tmp/s6-overlay-amd64.tar.gz \
+    && tar xvfz /tmp/s6-overlay-amd64.tar.gz -C / \
+    && rm -f /tmp/s6-overlay-key.asc \
+    && rm -f /tmp/s6-overlay-amd64.tar.gz \
+    && rm -f /tmp/s6-overlay-amd64.tar.gz.sig
+
+ADD rootfs /
+
+ENTRYPOINT ["/init"]
+# ----------------------------- test ---------------
+
+FROM frekele/debian:stable
+
+MAINTAINER frekele <leandro@frekele.org>
+
+# Set environment variables for program versions
+ENV JDK_VERSION=8
+ENV JDK_UPDATE=212
+ENV JDK_BUILD=b10
+ENV JDK_DISTRO_ARCH=linux-x64
+
+ENV JCE_FOLDER=UnlimitedJCEPolicyJDK$JDK_VERSION
+ENV JDK_FOLDER=jdk1.$JDK_VERSION.0_$JDK_UPDATE
+ENV JDK_VERSION_UPDATE=$JDK_VERSION'u'$JDK_UPDATE
+ENV JDK_VERSION_UPDATE_BUILD=$JDK_VERSION_UPDATE'-'$JDK_BUILD
+ENV JDK_VERSION_UPDATE_DISTRO_ARCH=$JDK_VERSION_UPDATE'-'$JDK_DISTRO_ARCH
+
+ENV JAVA_HOME=/opt/java
+ENV JRE_SECURITY_FOLDER=$JAVA_HOME/jre/lib/security
+ENV SSL_TRUSTED_CERTS_FOLDER=/opt/ssl/trusted
+
+# Change to tmp folder
+WORKDIR /tmp
+
+# Download and extract jdk to opt folder
+RUN wget --no-check-certificate https://github.com/frekele/oracle-java/releases/download/${JDK_VERSION_UPDATE_BUILD}/jdk-${JDK_VERSION_UPDATE_DISTRO_ARCH}.tar.gz \
+    && wget --no-check-certificate https://github.com/frekele/oracle-java/releases/download/${JDK_VERSION_UPDATE_BUILD}/jdk-${JDK_VERSION_UPDATE_DISTRO_ARCH}.tar.gz.md5 \
+    && echo "$(cat jdk-${JDK_VERSION_UPDATE_DISTRO_ARCH}.tar.gz.md5) jdk-${JDK_VERSION_UPDATE_DISTRO_ARCH}.tar.gz" | md5sum -c \
+    && tar -zvxf jdk-${JDK_VERSION_UPDATE_DISTRO_ARCH}.tar.gz -C /opt \
+    && ln -s /opt/${JDK_FOLDER} /opt/java \
+    && rm -f jdk-${JDK_VERSION_UPDATE_DISTRO_ARCH}.tar.gz \
+    && rm -f jdk-${JDK_VERSION_UPDATE_DISTRO_ARCH}.tar.gz.md5
+
+# Download zip file with java cryptography extension and unzip to jre security folder
+RUN wget --no-check-certificate https://github.com/frekele/oracle-java/releases/download/oracle_jce${JDK_VERSION}/jce_policy-${JDK_VERSION}.zip \
+    && unzip jce_policy-${JDK_VERSION}.zip \
+    && cp ${JCE_FOLDER}/*.jar ${JRE_SECURITY_FOLDER} \
+    && rm -f jce_policy-${JDK_VERSION}.zip \
+    && rm -rf ${JCE_FOLDER}
+
+# Add executables to path
+RUN update-alternatives --install "/usr/bin/java" "java" "/opt/java/bin/java" 1 && \
+    update-alternatives --set "java" "/opt/java/bin/java" && \
+    update-alternatives --install "/usr/bin/javac" "javac" "/opt/java/bin/javac" 1 && \
+    update-alternatives --set "javac" "/opt/java/bin/javac" && \
+    update-alternatives --install "/usr/bin/keytool" "keytool" "/opt/java/bin/keytool" 1 && \
+    update-alternatives --set "keytool" "/opt/java/bin/keytool"
+
+# Create trusted ssl certs folder
+RUN mkdir -p $SSL_TRUSTED_CERTS_FOLDER
+
+# Mark as volume
+VOLUME $SSL_TRUSTED_CERTS_FOLDER
+
+# Add the files
+ADD rootfs /
+
+# Change to root folder
+WORKDIR /root
+
+#----------------test line ------------------
+FROM frekele/java:jdk8
+
+ENV ANT_VERSION=1.10.3
+ENV ANT_HOME=/opt/ant
+
+# change to tmp folder
+WORKDIR /tmp
+
+# Download and extract apache ant to opt folder
+RUN wget --no-check-certificate --no-cookies http://archive.apache.org/dist/ant/binaries/apache-ant-${ANT_VERSION}-bin.tar.gz \
+    && wget --no-check-certificate --no-cookies http://archive.apache.org/dist/ant/binaries/apache-ant-${ANT_VERSION}-bin.tar.gz.sha512 \
+    && echo "$(cat apache-ant-${ANT_VERSION}-bin.tar.gz.sha512) apache-ant-${ANT_VERSION}-bin.tar.gz" | sha512sum -c \
+    && tar -zvxf apache-ant-${ANT_VERSION}-bin.tar.gz -C /opt/ \
+    && ln -s /opt/apache-ant-${ANT_VERSION} /opt/ant \
+    && rm -f apache-ant-${ANT_VERSION}-bin.tar.gz \
+    && rm -f apache-ant-${ANT_VERSION}-bin.tar.gz.sha512
+
+# add executables to path
+RUN update-alternatives --install "/usr/bin/ant" "ant" "/opt/ant/bin/ant" 1 && \
+    update-alternatives --set "ant" "/opt/ant/bin/ant" 
+
+# Add the files
+ADD rootfs /
+
+# change to root folder
+WORKDIR /root
