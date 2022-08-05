@@ -1,7 +1,7 @@
 FROM alpine:latest
 # create dir 
 RUN mkdir /usr/app
-# Create a user group 'usergroup'
+# Create a user group 'usergroup' as system group
 RUN addgroup -S usergroup
 
 # Create a user 'appuser' under 'usergroup'
